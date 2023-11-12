@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	pb "github.com/digital-dream-labs/api/go/chipperpb"
@@ -110,6 +111,7 @@ func togetherRequest(transcribedText string) string {
 }
 
 func openaiRequest(transcribedText string) string {
+	//interessant 
 	sendString := "You are a helpful robot called " + vars.APIConfig.Knowledge.RobotName + ". You will be given a question asked by a user and you must provide the best answer you can. It may not be punctuated or spelled correctly as the STT model is small. The answer will be put through TTS, so it should be a speakable string. Keep the answer concise yet informative. Here is the question: " + "\\" + "\"" + transcribedText + "\\" + "\"" + " , Answer: "
 	logger.Println("Making request to OpenAI...")
 	url := "https://api.openai.com/v1/completions"
@@ -184,6 +186,7 @@ func KgRequest(speechReq sr.SpeechRequest) string {
 			return houndifyKG(speechReq)
 		} else if vars.APIConfig.Knowledge.Provider == "openai" {
 			return openaiKG(speechReq)
+			
 		} else if vars.APIConfig.Knowledge.Provider == "together" {
 			return togetherKG(speechReq)
 		}
@@ -192,6 +195,8 @@ func KgRequest(speechReq sr.SpeechRequest) string {
 }
 
 func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.KnowledgeGraphResponse, error) {
+	sr.BotNum = sr.BotNum + 1
+	// Entree
 	InitKnowledge()
 	speechReq := sr.ReqToSpeechRequest(req)
 	apiResponse := KgRequest(speechReq)
@@ -201,10 +206,88 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 		CommandType: NoResult,
 		SpokenText:  apiResponse,
 	}
-	logger.Println("(KG) Bot " + speechReq.Device + " request served.")
+	sr.BotNum = sr.BotNum - 1
+	logger.Println("(KG) Bot " + strconv.Itoa(speechReq.BotNum) + " request served.")
+
+	// Use of Vector SDK for sending the TTS
+
+	// Créer un WaitGroup pour attendre la fin de toutes les goroutines
+	var wg sync.WaitGroup
+
+	// Créer un canal pour signaler le succès de chaque goroutine
+	successCh := make(chan bool, 3)
+
+	// Lancer les 3 requêtes de manière asynchrone (en parallèle)
+	wg.Add(3)
+	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.BotNum , &wg)
+	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.BotNum , req.Stream, &wg)
+	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.BotNum , &wg)
+
+	// Attendre que toutes les goroutines se terminent
+	wg.Wait()
+
+	// Fermer le canal après que toutes les goroutines ont terminé
+	close(successCh)
+
+	// Vérifier si les trois requêtes ont réussi
+	for success := range successCh {
+		if !success {
+			// Si l'une des requêtes a échoué, lancez une requête synchrone et renvoyez une erreur
+			if err := retryRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.BotNum, req.Stream); err != nil {
+				return nil, fmt.Errorf("Une ou plusieurs requêtes ont échoué et la requête de réessai a également échoué: %v", err)
+			}
+			break
+		}
+	}
+
+	// Envoyer la réponse du knowledge graph
 	if err := req.Stream.Send(&kg); err != nil {
 		return nil, err
 	}
 	return nil, nil
-
 }
+
+func sendRequest(url string, wg *sync.WaitGroup, successCh chan bool) {
+	defer wg.Done()
+
+	// Effectuer la requête GET
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Println("Erreur lors de la requête GET:", err)
+		// Signal d'échec à travers le canal
+		successCh <- false
+		return
+	}
+	defer resp.Body.Close()
+
+	// Traitement de la réponse (remplacez cela par votre propre logique de traitement)
+	fmt.Printf("Réponse pour %s : Code %d\n", url, resp.StatusCode)
+
+	// Envoyer la réponse via le stream
+	// Utilisez votre propre logique pour envoyer la réponse à votre stream
+	// Ici, nous utilisons fmt.Fprint comme exemple
+	fmt.Fprint(stream, "Réponse pour "+url+" : Code "+strconv.Itoa(resp.StatusCode)+"\n")
+
+	// Signal de succès à travers le canal
+	successCh <- true
+}
+
+func retryRequest(url string) error {
+	// Effectuer la requête GET de réessai de manière synchrone
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("La requête de réessai a échoué: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Traitement de la réponse de réessai (remplacez cela par votre propre logique de traitement)
+	fmt.Printf("Réponse pour %s (retry) : Code %d\n", url, resp.StatusCode)
+
+	// Envoyer la réponse de réessai via le stream
+	// Utilisez votre propre logique pour envoyer la réponse à votre stream
+	// Ici, nous utilisons fmt.Fprint comme exemple
+	fmt.Fprint(stream, "Réponse pour "+url+" (retry) : Code "+strconv.Itoa(resp.StatusCode)+"\n")
+
+	return nil
+}
+
