@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	pb "github.com/digital-dream-labs/api/go/chipperpb"
@@ -111,7 +110,6 @@ func togetherRequest(transcribedText string) string {
 }
 
 func openaiRequest(transcribedText string) string {
-	//interessant 
 	sendString := "You are a helpful robot called " + vars.APIConfig.Knowledge.RobotName + ". You will be given a question asked by a user and you must provide the best answer you can. It may not be punctuated or spelled correctly as the STT model is small. The answer will be put through TTS, so it should be a speakable string. Keep the answer concise yet informative. Here is the question: " + "\\" + "\"" + transcribedText + "\\" + "\"" + " , Answer: "
 	logger.Println("Making request to OpenAI...")
 	url := "https://api.openai.com/v1/completions"
@@ -186,7 +184,6 @@ func KgRequest(speechReq sr.SpeechRequest) string {
 			return houndifyKG(speechReq)
 		} else if vars.APIConfig.Knowledge.Provider == "openai" {
 			return openaiKG(speechReq)
-			
 		} else if vars.APIConfig.Knowledge.Provider == "together" {
 			return togetherKG(speechReq)
 		}
@@ -195,7 +192,6 @@ func KgRequest(speechReq sr.SpeechRequest) string {
 }
 
 func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.KnowledgeGraphResponse, error) {
-	sr.BotNum = sr.BotNum + 1
 	// Entree
 	InitKnowledge()
 	speechReq := sr.ReqToSpeechRequest(req)
@@ -206,8 +202,7 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 		CommandType: NoResult,
 		SpokenText:  apiResponse,
 	}
-	sr.BotNum = sr.BotNum - 1
-	logger.Println("(KG) Bot " + strconv.Itoa(speechReq.BotNum) + " request served.")
+	logger.Println("(KG) Bot " + strconv.Itoa(speechReq.Device) + " request served.")
 
 	// Use of Vector SDK for sending the TTS
 
@@ -219,9 +214,9 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 
 	// Lancer les 3 requêtes de manière asynchrone (en parallèle)
 	wg.Add(3)
-	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.BotNum , &wg)
-	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.BotNum , req.Stream, &wg)
-	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.BotNum , &wg)
+	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.Device , &wg)
+	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.Device , req.Stream, &wg)
+	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device , &wg)
 
 	// Attendre que toutes les goroutines se terminent
 	wg.Wait()
@@ -233,7 +228,7 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 	for success := range successCh {
 		if !success {
 			// Si l'une des requêtes a échoué, lancez une requête synchrone et renvoyez une erreur
-			if err := retryRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.BotNum, req.Stream); err != nil {
+			if err := retryRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device, req.Stream); err != nil {
 				return nil, fmt.Errorf("Une ou plusieurs requêtes ont échoué et la requête de réessai a également échoué: %v", err)
 			}
 			break
