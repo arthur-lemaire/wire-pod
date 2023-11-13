@@ -217,9 +217,9 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 
 	// Lancer les 3 requêtes de manière asynchrone (en parallèle)
 	wg.Add(3)
-	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.Device , &wg)
-	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.Device ,  &wg)
-	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device , &wg)
+	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.Device , &wg, successCh)
+	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.Device ,  &wg, successCh)
+	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device , &wg, successCh)
 
 	// Attendre que toutes les goroutines se terminent
 	wg.Wait()
