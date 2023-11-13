@@ -215,10 +215,12 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 
 	// Lancer les 3 requêtes de manière asynchrone (en parallèle)
 	wg.Add(3)
+	logger.Println("Sending the 3 request to setup the TTS")
 	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.Device , &wg, successCh)
 	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.Device ,  &wg, successCh)
 	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device , &wg, successCh)
-
+	logger.Println("Ending of the TTS routine")
+	
 	// Attendre que toutes les goroutines se terminent
 	wg.Wait()
 
@@ -257,7 +259,7 @@ func sendRequest(url string, wg *sync.WaitGroup, successCh chan bool) {
 	defer resp.Body.Close()
 
 	// Traitement de la réponse (remplacez cela par votre propre logique de traitement)
-	fmt.Printf("Réponse pour %s : Code %d\n", url, resp.StatusCode)
+	logger.Println("Réponse pour %s : Code %d\n", url, resp.StatusCode)
 
 	// Signal de succès à travers le canal
 	successCh <- true
@@ -272,7 +274,7 @@ func retryRequest(url string) error {
 	defer resp.Body.Close()
 
 	// Traitement de la réponse de réessai (remplacez cela par votre propre logique de traitement)
-	fmt.Printf("Réponse pour %s (retry) : Code %d\n", url, resp.StatusCode)
+	logger.Println("Réponse pour %s (retry) : Code %d\n", url, resp.StatusCode)
 
 	return nil
 }
