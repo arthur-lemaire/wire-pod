@@ -14,14 +14,32 @@ import (
 
 // initialize variables so they don't have to be found during runtime
 
+var VarsInited bool
+
+// if compiled into an installation package. wire-pod will use os.UserConfigDir()
+var Packaged bool
+
 var (
 	JdocsPath         string = "./jdocs/jdocs.json"
+	JdocsDir          string = "./jdocs"
 	CustomIntentsPath string = "./customIntents.json"
 	BotConfigsPath    string = "./botConfig.json"
 	BotInfoPath       string = "./jdocs/botSdkInfo.json"
+	BotInfoName       string = "botSdkInfo.json"
 	PodName           string = "wire-pod"
 	VoskModelPath     string = "../vosk/models/"
+	SessionCertPath   string = "./session-certs/"
 )
+
+var (
+	OutboundIPTester = "8.8.8.8:80"
+	CertPath         = "../certs/cert.crt"
+	KeyPath          = "../certs/cert.key"
+	ServerConfigPath = "../certs/server_config.json"
+	Certs            = "../certs"
+)
+
+var WebPort string = "8080"
 
 // /home/name/.anki_vector/
 var SDKIniPath string
@@ -36,6 +54,10 @@ var VoskGrammerEnable bool = false
 var SttInitFunc func() error
 var MatchListList [][]string
 var IntentsList = []string{}
+
+var ChipperCert []byte
+var ChipperKey []byte
+var ChipperKeysLoaded bool
 
 type RobotInfoStore struct {
 	GlobalGUID string `json:"global_guid"`
@@ -88,19 +110,43 @@ func join(p1, p2 string) string {
 }
 
 func Init() {
+	if VarsInited {
+		logger.Println("Not initting vars again")
+		return
+	}
 	logger.Println("Initializing variables")
 
-	if runtime.GOOS == "windows" {
-		logger.Println("GOOS is Windows, set vars accordingly...")
+	if Packaged {
+		logger.Println("This version of wire-pod is packaged. Set vars to include UserConfigDir...")
 		confDir, _ := os.UserConfigDir()
 		podDir := join(confDir, PodName)
 		os.Mkdir(podDir, 0777)
-		JdocsPath = join(confDir, JdocsPath)
-		CustomIntentsPath = join(confDir, CustomIntentsPath)
-		BotConfigsPath = join(confDir, BotConfigsPath)
-		BotInfoPath = join(confDir, BotInfoPath)
-		VoskModelPath = join(confDir, VoskModelPath)
-		ApiConfigPath = join(confDir, ApiConfigPath)
+		JdocsDir = join(podDir, JdocsDir)
+		JdocsPath = JdocsDir + "/jdocs.json"
+		CustomIntentsPath = join(podDir, CustomIntentsPath)
+		BotConfigsPath = join(podDir, BotConfigsPath)
+		BotInfoPath = JdocsDir + "/" + BotInfoName
+		VoskModelPath = join(podDir, "./vosk/models/")
+		ApiConfigPath = join(podDir, ApiConfigPath)
+		CertPath = join(podDir, "./certs/cert.crt")
+		KeyPath = join(podDir, "./certs/cert.key")
+		ServerConfigPath = join(podDir, "./certs/server_config.json")
+		Certs = join(podDir, "./certs")
+		SessionCertPath = join(podDir, SessionCertPath)
+		os.Mkdir(JdocsDir, 0777)
+		os.Mkdir(SessionCertPath, 0777)
+		os.Mkdir(Certs, 0777)
+	}
+
+	if os.Getenv("WEBSERVER_PORT") != "" {
+		if _, err := strconv.Atoi(os.Getenv("WEBSERVER_PORT")); err == nil {
+			WebPort = os.Getenv("WEBSERVER_PORT")
+		} else {
+			logger.Println("WEBSERVER_PORT contains letters, using default of 8080")
+			WebPort = "8080"
+		}
+	} else {
+		WebPort = "8080"
 	}
 
 	// figure out user SDK path, containing sdk_config.ini
@@ -156,6 +202,7 @@ func Init() {
 		logger.Println("Loaded bot info file, known bots: " + fmt.Sprint(botList))
 	}
 	LoadCustomIntents()
+	VarsInited = true
 }
 
 func GetDownloadedVoskModels() {

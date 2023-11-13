@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	chipperpb "github.com/digital-dream-labs/api/go/chipperpb"
@@ -14,7 +15,6 @@ import (
 	"github.com/digital-dream-labs/hugh/log"
 	"github.com/getlantern/systray"
 	"github.com/grandcat/zeroconf"
-	"github.com/kercre123/chipper/pkg/initwirepod"
 	"github.com/kercre123/chipper/pkg/logger"
 	chipperserver "github.com/kercre123/chipper/pkg/servers/chipper"
 	jdocsserver "github.com/kercre123/chipper/pkg/servers/jdocs"
@@ -39,6 +39,31 @@ var listenerTwo net.Listener
 var voiceProcessor *wp.Server
 
 var epodIsPosting bool
+
+var NotSetUp string = "Wire-pod is not setup. Use the webserver at port " + vars.WebPort + " to set up wire-pod."
+
+func NeedsSetupMsg() {
+	go func() {
+		err := zenity.Info(
+			getNeedsSetupMsg(),
+			zenity.Icon(mBoxIcon),
+			zenity.Title(mBoxTitle),
+			zenity.ExtraButton("Open browser"),
+		)
+		if err != nil {
+			if err == zenity.ErrExtraButton {
+				openBrowser("http://" + botsetup.GetOutboundIP().String() + ":" + vars.WebPort)
+			}
+		}
+	}()
+}
+
+func ErrMsg(err error) {
+	zenity.Error("wire-pod has run into an issue. The program will now exit. Error details: "+err.Error(),
+		zenity.ErrorIcon,
+		zenity.Title(mBoxTitle))
+	ExitProgram(1)
+}
 
 // grpcServer *grpc.Servervar
 var chipperServing bool = false
@@ -93,7 +118,7 @@ func BeginWirepodSpecific(sttInitFunc func() error, sttHandlerFunc interface{}, 
 	voiceProcessor, err = wp.New(sttInitFunc, sttHandlerFunc, voiceProcessorName)
 	wpweb.SttInitFunc = sttInitFunc
 	go sdkWeb.BeginServer()
-	http.HandleFunc("/api-chipper/", initwirepod.ChipperHTTPApi)
+	http.HandleFunc("/api-chipper/", ChipperHTTPApi)
 	if err != nil {
 		return err
 	}
@@ -103,39 +128,23 @@ func BeginWirepodSpecific(sttInitFunc func() error, sttHandlerFunc interface{}, 
 func StartFromProgramInit(sttInitFunc func() error, sttHandlerFunc interface{}, voiceProcessorName string) {
 	err := BeginWirepodSpecific(sttInitFunc, sttHandlerFunc, voiceProcessorName)
 	if err != nil {
-		logger.Println("\033[33m\033[1mWire-pod is not setup. Use the webserver at port 8080 to set up wire-pod.\033[0m")
-		go zenity.Info(
-			mBoxNeedsSetupMsg,
-			zenity.NoIcon,
-			zenity.Title(mBoxTitle),
-		)
-		systray.SetTooltip("wire-pod must be set up at http://localhost:8080.")
+		logger.Println("Wire-pod is not setup. Use the webserver at port " + vars.WebPort + " to set up wire-pod.")
+		vars.APIConfig.PastInitialSetup = false
+		vars.WriteConfigToDisk()
+		NeedsSetupMsg()
+		systray.SetTooltip("wire-pod must be set up at http://" + botsetup.GetOutboundIP().String() + ":" + vars.WebPort)
 	} else if !vars.APIConfig.PastInitialSetup {
-		logger.Println("\033[33m\033[1mWire-pod is not setup. Use the webserver at port 8080 to set up wire-pod.\033[0m")
-		go zenity.Info(
-			mBoxNeedsSetupMsg,
-			zenity.NoIcon,
-			zenity.Title(mBoxTitle),
-		)
-		systray.SetTooltip("wire-pod must be set up at http://localhost:8080.")
+		logger.Println("Wire-pod is not setup. Use the webserver at port " + vars.WebPort + " to set up wire-pod.")
+		NeedsSetupMsg()
+		systray.SetTooltip("wire-pod must be set up at http://" + botsetup.GetOutboundIP().String() + ":" + vars.WebPort)
 	} else if vars.APIConfig.STT.Service == "vosk" && vars.APIConfig.STT.Language == "" {
 		logger.Println("\033[33m\033[1mLanguage value is blank, but STT service is Vosk. Reinitiating setup process.\033[0m")
-		logger.Println("\033[33m\033[1mWire-pod is not setup. Use the webserver at port 8080 to set up wire-pod.\033[0m")
-		go zenity.Info(
-			mBoxNeedsSetupMsg,
-			zenity.NoIcon,
-			zenity.Title(mBoxTitle),
-		)
-		systray.SetTooltip("wire-pod must be set up at http://localhost:8080.")
+		logger.Println("Wire-pod is not setup. Use the webserver at port " + vars.WebPort + " to set up wire-pod.")
+		NeedsSetupMsg()
+		systray.SetTooltip("wire-pod must be set up at http://" + botsetup.GetOutboundIP().String() + ":" + vars.WebPort)
 		vars.APIConfig.PastInitialSetup = false
 	} else {
-		go zenity.Info(
-			mBoxSuccess,
-			zenity.NoIcon,
-			zenity.Title(mBoxTitle),
-		)
-		systray.SetTitle("wire-pod is running.")
-		go StartChipper()
+		go StartChipper(true)
 	}
 	// main thread is configuration ws
 	wpweb.StartWebServer()
@@ -153,11 +162,33 @@ func PostmDNS() {
 	}
 }
 
+func IfFileExist(name string) bool {
+	_, err := os.Stat(name)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
 func CheckHostname() {
 	hostname, _ := os.Hostname()
-	if hostname != "escapepod" && vars.APIConfig.Server.EPConfig {
+	confDir, _ := os.UserConfigDir()
+	warnFile := filepath.Join(confDir, vars.PodName) + "/NoPodWarn"
+	if hostname != "escapepod" && vars.APIConfig.Server.EPConfig && !IfFileExist(warnFile) {
 		logger.Println("\033[31m\033[1mWARNING: You have chosen the Escape Pod config, but the system hostname is not 'escapepod'. This means your robot will not be able to communicate with wire-pod unless you have a custom network configuration.")
 		logger.Println("Actual reported hostname: " + hostname + "\033[0m")
+		err := zenity.Warning(
+			"WARNING: You have selected the Escape Pod config, but the system hostname is not 'escapepod'. This means your robot will not be able to communicate with wire-pod unless you have a custom network configuration.",
+			zenity.ExtraButton("Don't show again"),
+			zenity.OKLabel("OK"),
+			zenity.WarningIcon,
+			zenity.Title(mBoxTitle),
+		)
+		if err != nil {
+			if err == zenity.ErrExtraButton {
+				os.WriteFile(filepath.Join(confDir, vars.PodName)+"/NoPodWarn", []byte("true"), 0777)
+			}
+		}
 	}
 }
 
@@ -168,12 +199,15 @@ func RestartServer() {
 		listenerOne.Close()
 		listenerTwo.Close()
 	}
-	go StartChipper()
+	go StartChipper(false)
 }
 
-func StartChipper() {
-	if vars.APIConfig.Server.EPConfig && !epodIsPosting {
-		go PostmDNS()
+func StartChipper(fromInit bool) {
+	// if vars.APIConfig.Server.EPConfig && !epodIsPosting {
+	// 	go PostmDNS()
+	// }
+	if vars.APIConfig.Server.EPConfig {
+		CheckHostname()
 	}
 	// load certs
 	var certPub []byte
@@ -181,23 +215,31 @@ func StartChipper() {
 	if vars.APIConfig.Server.EPConfig {
 		certPub, _ = os.ReadFile("./epod/ep.crt")
 		certPriv, _ = os.ReadFile("./epod/ep.key")
+		vars.ChipperKey = certPriv
+		vars.ChipperCert = certPub
 	} else {
-		var err error
-		certPub, _ = os.ReadFile("../certs/cert.crt")
-		certPriv, err = os.ReadFile("../certs/cert.key")
-		if err != nil {
-			logger.Println("wire-pod is not setup.")
-			return
+		if !vars.ChipperKeysLoaded {
+			var err error
+			certPub, _ = os.ReadFile(vars.CertPath)
+			certPriv, err = os.ReadFile(vars.KeyPath)
+			if err != nil {
+				logger.Println("Unable to read certificates. wire-pod is not setup.")
+				logger.Println(err)
+				ErrMsg(err)
+				ExitProgram(1)
+				return
+			}
+			vars.ChipperKey = certPriv
+			vars.ChipperCert = certPub
 		}
 	}
 
 	logger.Println("Initiating TLS listener, cmux, gRPC handler, and REST handler")
-	cert, err := tls.X509KeyPair(certPub, certPriv)
+	cert, err := tls.X509KeyPair(vars.ChipperCert, vars.ChipperKey)
 	if err != nil {
-		zenity.Error("wire-pod has run into an issue. The program will now exist. Error details: "+err.Error(),
-			zenity.Title(mBoxTitle))
+		ErrMsg(err)
 		logger.Println(err)
-		os.Exit(1)
+		ExitProgram(1)
 	}
 	logger.Println("Starting chipper server at port " + vars.APIConfig.Server.Port)
 	listenerOne, err = tls.Listen("tcp", ":"+vars.APIConfig.Server.Port, &tls.Config{
@@ -205,10 +247,9 @@ func StartChipper() {
 		CipherSuites: nil,
 	})
 	if err != nil {
-		zenity.Error("wire-pod has run into an issue. The program will now exist. Error details: "+err.Error(),
-			zenity.Title(mBoxTitle))
+		ErrMsg(err)
 		fmt.Println(err)
-		os.Exit(1)
+		ExitProgram(1)
 	}
 	serverOne = cmux.New(listenerOne)
 	grpcListenerOne := serverOne.Match(cmux.HTTP2())
@@ -223,10 +264,9 @@ func StartChipper() {
 			CipherSuites: nil,
 		})
 		if err != nil {
-			zenity.Error("wire-pod has run into an issue. The program will now exist. Error details: "+err.Error(),
-				zenity.Title(mBoxTitle))
+			ErrMsg(err)
 			fmt.Println(err)
-			os.Exit(1)
+			ExitProgram(1)
 		}
 		serverTwo = cmux.New(listenerTwo)
 		grpcListenerTwo := serverTwo.Match(cmux.HTTP2())
@@ -236,6 +276,13 @@ func StartChipper() {
 	}
 
 	systray.SetTooltip("wire-pod is running.")
+	if fromInit {
+		go zenity.Info(
+			mBoxSuccess,
+			zenity.Icon(mBoxIcon),
+			zenity.Title(mBoxTitle),
+		)
+	}
 	fmt.Println("\033[33m\033[1mwire-pod started successfully!\033[0m")
 
 	chipperServing = true
