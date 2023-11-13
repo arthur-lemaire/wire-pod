@@ -9,6 +9,8 @@ import (
 	 "fmt"
    	 "sync"
    	 "time"
+	  "strconv"
+	"stream"
 	pb "github.com/digital-dream-labs/api/go/chipperpb"
 	"github.com/kercre123/chipper/pkg/logger"
 	"github.com/kercre123/chipper/pkg/vars"
@@ -217,7 +219,7 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 	// Lancer les 3 requêtes de manière asynchrone (en parallèle)
 	wg.Add(3)
 	go sendRequest("http://escapepod.local/api-sdk/assume_behavior_control?priority=high&serial="+speechReq.Device , &wg)
-	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.Device , req.Stream, &wg)
+	go sendRequest("http://escapepod.local/api-sdk/say_text?text=" + apiResponse + "serial=" + speechReq.Device  &wg)
 	go sendRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device , &wg)
 
 	// Attendre que toutes les goroutines se terminent
@@ -230,7 +232,7 @@ func (s *Server) ProcessKnowledgeGraph(req *vtt.KnowledgeGraphRequest) (*vtt.Kno
 	for success := range successCh {
 		if !success {
 			// Si l'une des requêtes a échoué, lancez une requête synchrone et renvoyez une erreur
-			if err := retryRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device, req.Stream); err != nil {
+			if err := retryRequest("http://escapepod.local/api-sdk/release_behavior_control?serial="+speechReq.Device); err != nil {
 				return nil, fmt.Errorf("Une ou plusieurs requêtes ont échoué et la requête de réessai a également échoué: %v", err)
 			}
 			break
