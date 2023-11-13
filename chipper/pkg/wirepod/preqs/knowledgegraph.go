@@ -8,8 +8,6 @@ import (
 	"strings"
 	 "fmt"
    	 "sync"
-   	 "time"
-	  "strconv"
 	pb "github.com/digital-dream-labs/api/go/chipperpb"
 	"github.com/kercre123/chipper/pkg/logger"
 	"github.com/kercre123/chipper/pkg/vars"
