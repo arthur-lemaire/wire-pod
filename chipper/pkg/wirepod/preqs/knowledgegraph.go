@@ -262,11 +262,6 @@ func sendRequest(url string, wg *sync.WaitGroup, successCh chan bool) {
 	// Traitement de la réponse (remplacez cela par votre propre logique de traitement)
 	fmt.Printf("Réponse pour %s : Code %d\n", url, resp.StatusCode)
 
-	// Envoyer la réponse via le stream
-	// Utilisez votre propre logique pour envoyer la réponse à votre stream
-	// Ici, nous utilisons fmt.Fprint comme exemple
-	fmt.Fprint(stream, "Réponse pour "+url+" : Code "+strconv.Itoa(resp.StatusCode)+"\n")
-
 	// Signal de succès à travers le canal
 	successCh <- true
 }
@@ -281,11 +276,6 @@ func retryRequest(url string) error {
 
 	// Traitement de la réponse de réessai (remplacez cela par votre propre logique de traitement)
 	fmt.Printf("Réponse pour %s (retry) : Code %d\n", url, resp.StatusCode)
-
-	// Envoyer la réponse de réessai via le stream
-	// Utilisez votre propre logique pour envoyer la réponse à votre stream
-	// Ici, nous utilisons fmt.Fprint comme exemple
-	fmt.Fprint(stream, "Réponse pour "+url+" (retry) : Code "+strconv.Itoa(resp.StatusCode)+"\n")
 
 	return nil
 }
